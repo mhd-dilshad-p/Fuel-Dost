@@ -13,7 +13,7 @@ import '../widgets/trip_toggle.dart';
 import '../../../map/presentation/widgets/map_view.dart';
 import '../../../map/presentation/widgets/route_info_card.dart';
 import '../widgets/vehicle_animation_header.dart';
-import '../widgets/quick_actions.dart';
+
 
 class CalculatorScreen extends ConsumerStatefulWidget {
   const CalculatorScreen({super.key});
@@ -117,10 +117,7 @@ class _CalculatorScreenState extends ConsumerState<CalculatorScreen> {
 
                           const SizedBox(height: 8),
 
-                          // Quick Actions Row
-                          const QuickActionsWidget(),
-
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 8),
 
                           // ROUTE INFO SECTION
                           // Wrapped in a subtle shadow for elevation

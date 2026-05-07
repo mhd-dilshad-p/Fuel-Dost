@@ -17,6 +17,8 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
   late TextEditingController _distanceController;
   late TextEditingController _mileageController;
   late TextEditingController _priceController;
+  final FocusNode _distanceFocus = FocusNode();
+  bool _distanceUserEditing = false;
 
   @override
   void initState() {
@@ -24,10 +26,15 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
     _distanceController = TextEditingController();
     _mileageController = TextEditingController(text: '15');
     _priceController = TextEditingController();
+
+    _distanceFocus.addListener(() {
+      _distanceUserEditing = _distanceFocus.hasFocus;
+    });
   }
 
   @override
   void dispose() {
+    _distanceFocus.dispose();
     _distanceController.dispose();
     _mileageController.dispose();
     _priceController.dispose();
@@ -50,9 +57,9 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
 
   @override
   Widget build(BuildContext context) {
-    // Sync distance
+    // Only sync distance from map when the user is NOT manually typing
     ref.listen<double>(distanceProvider, (prev, next) {
-      if (next > 0) {
+      if (!_distanceUserEditing && next > 0) {
         final text = next.toStringAsFixed(1);
         if (_distanceController.text != text) {
           _distanceController.text = text;
@@ -62,18 +69,6 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
 
     final distanceMethod = ref.watch(distanceMethodProvider);
     final vehicleType = ref.watch(vehicleTypeProvider);
-    final isAutoPrice = ref.watch(isAutoFuelPriceProvider);
-    final autoPriceAsync = ref.watch(fuelPriceProvider);
-
-    // Sync price if in Auto mode
-    ref.listen(effectiveFuelPriceProvider, (prev, next) {
-      if (isAutoPrice && next > 0) {
-        final text = next.toStringAsFixed(2);
-        if (_priceController.text != text) {
-          _priceController.text = text;
-        }
-      }
-    });
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -100,7 +95,7 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 20),
 
             // DISTANCE METHOD TOGGLE
@@ -127,23 +122,44 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
 
             const SizedBox(height: 12),
 
-            // Distance Input
-            _InputField(
+            // Distance Input — focus tracked to avoid overwriting while typing
+            TextField(
               controller: _distanceController,
-              label: '',
-              suffix: 'km',
-              icon: Icons.straighten_rounded,
-              hint: distanceMethod == DistanceMethod.auto 
-                ? 'Select route on map' 
-                : 'Enter distance manually',
+              focusNode: _distanceFocus,
               enabled: distanceMethod == DistanceMethod.manual,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
               onChanged: (value) {
                 final parsed = double.tryParse(value) ?? 0;
                 ref.read(distanceProvider.notifier).state = parsed;
               },
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: distanceMethod == DistanceMethod.manual
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+              ),
+              decoration: InputDecoration(
+                hintText: distanceMethod == DistanceMethod.auto
+                    ? 'Select route on map'
+                    : 'Enter distance manually',
+                prefixIcon: Icon(
+                  Icons.straighten_rounded,
+                  color: distanceMethod == DistanceMethod.manual
+                      ? AppColors.primary
+                      : AppColors.textSecondary,
+                  size: 22,
+                ),
+                suffixText: 'km',
+                filled: distanceMethod != DistanceMethod.manual,
+                fillColor: AppColors.surfaceVariant.withOpacity(0.5),
+              ),
             ).animate(target: distanceMethod == DistanceMethod.manual ? 1 : 0)
              .shimmer(duration: 800.ms, color: AppColors.primary.withOpacity(0.1)),
-            
+
             const SizedBox(height: 12),
 
             // Mileage Input
@@ -158,28 +174,36 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
                 ref.read(mileageProvider.notifier).state = parsed;
               },
             ),
-            
-            const SizedBox(height: 8),
-            // Mileage Presets
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                   const SizedBox(width: 48),
-                   if (vehicleType == VehicleType.bike) ...[
-                     _PresetChip(label: '35', onTap: () => _updateMileage(35)),
-                     _PresetChip(label: '40', onTap: () => _updateMileage(40)),
-                     _PresetChip(label: '45', onTap: () => _updateMileage(45)),
-                   ] else ...[
-                     _PresetChip(label: '12', onTap: () => _updateMileage(12)),
-                     _PresetChip(label: '15', onTap: () => _updateMileage(15)),
-                     _PresetChip(label: '18', onTap: () => _updateMileage(18)),
-                   ],
-                ],
+
+            const SizedBox(height: 10),
+
+            // Mileage Presets — redesigned as larger labelled tiles
+            Padding(
+              padding: const EdgeInsets.only(left: 48),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    if (vehicleType == VehicleType.bike) ...[
+                      _PresetChip(label: '35 km/l', onTap: () => _updateMileage(35)),
+                      const SizedBox(width: 10),
+                      _PresetChip(label: '40 km/l', onTap: () => _updateMileage(40)),
+                      const SizedBox(width: 10),
+                      _PresetChip(label: '45 km/l', onTap: () => _updateMileage(45)),
+                    ] else ...[
+                      _PresetChip(label: '12 km/l', onTap: () => _updateMileage(12)),
+                      const SizedBox(width: 10),
+                      _PresetChip(label: '15 km/l', onTap: () => _updateMileage(15)),
+                      const SizedBox(width: 10),
+                      _PresetChip(label: '18 km/l', onTap: () => _updateMileage(18)),
+                    ],
+                  ],
+                ),
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
 
             // FUEL TYPE SELECTION
             Row(
@@ -203,59 +227,48 @@ class _FuelInputCardState extends ConsumerState<FuelInputCard> {
               ],
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
 
-            // Fuel Price Control Header
+            // FUEL PRICE — always manual, different prices per region
             Row(
               children: [
                 const SizedBox(width: 4),
+                Icon(Icons.local_gas_station_rounded,
+                    size: 18, color: AppColors.primary),
+                const SizedBox(width: 8),
                 Text(
                   'Fuel Price',
                   style: GoogleFonts.inter(
                     fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
                 ),
-                const Spacer(),
-                const Text('Auto', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                Switch(
-                  value: isAutoPrice,
-                  activeTrackColor: AppColors.primary.withOpacity(0.5),
-                  activeThumbColor: AppColors.primary,
-                  onChanged: (val) {
-                    ref.read(isAutoFuelPriceProvider.notifier).state = val;
-                    if (!val) {
-                      // Manual: set override provider to current box value.
-                      final t = double.tryParse(_priceController.text);
-                      ref.read(fuelPriceOverrideProvider.notifier).state = t;
-                    } else {
-                      ref.read(fuelPriceOverrideProvider.notifier).state = null;
-                    }
-                  },
+                const SizedBox(width: 6),
+                Text(
+                  '(your region)',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.textTertiary,
+                  ),
                 ),
-                if (isAutoPrice)
-                  autoPriceAsync.when(
-                    data: (m) => const Icon(Icons.cloud_done, color: AppColors.primary, size: 16),
-                    loading: () => const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
-                    error: (_,__) => const Icon(Icons.cloud_off, color: AppColors.error, size: 16),
-                  )
               ],
             ),
 
-            // Price Input
+            const SizedBox(height: 8),
+
+            // Price Input — always enabled, always manual
             _InputField(
               controller: _priceController,
-              label: '', // Hidden as we use custom header
+              label: '',
               suffix: '₹/L',
               icon: Icons.currency_rupee_rounded,
-              hint: isAutoPrice ? 'Auto-fetching...' : 'Enter manual price',
-              enabled: !isAutoPrice,
+              hint: 'Enter your local fuel price',
+              enabled: true,
               onChanged: (value) {
-                if (!isAutoPrice) {
-                  final parsed = double.tryParse(value);
-                  ref.read(fuelPriceOverrideProvider.notifier).state = parsed;
-                }
+                final parsed = double.tryParse(value);
+                ref.read(fuelPriceOverrideProvider.notifier).state = parsed;
               },
             ),
           ],
@@ -279,15 +292,19 @@ class _PresetChip extends StatelessWidget {
         onTap();
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.divider),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.divider, width: 1.2),
         ),
         child: Text(
           label,
-          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppColors.primary,
+          ),
         ),
       ),
     );

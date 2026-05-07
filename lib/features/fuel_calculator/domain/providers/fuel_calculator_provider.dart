@@ -1,13 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/fuel_calculator.dart';
-import '../../data/models/fuel_price_model.dart';
-import '../../data/repositories/fuel_price_repository.dart';
-
-// ─── Repositories ───────────────────────────────────────────────
-
-final fuelPriceRepositoryProvider = Provider<FuelPriceRepository>((ref) {
-  return FuelPriceRepository();
-});
 
 // ─── Input State Providers ──────────────────────────────────────
 
@@ -29,48 +21,15 @@ final fuelTypeProvider = StateProvider<FuelType>((ref) => FuelType.petrol);
 /// One-way or round trip toggle.
 final isRoundTripProvider = StateProvider<bool>((ref) => false);
 
-/// Auto vs Manual fuel price toggle.
-final isAutoFuelPriceProvider = StateProvider<bool>((ref) => true);
-
-/// Manual fuel price override (null = use API price).
+/// Manual fuel price override — entered by the user for their region.
 final fuelPriceOverrideProvider = StateProvider<double?>((ref) => null);
 
-/// User's detected city for fuel price lookup.
-final userCityProvider = StateProvider<String>((ref) => 'Delhi');
-
-// ─── Fuel Price Provider ────────────────────────────────────────
-
-/// Async provider that fetches fuel price based on city.
-final fuelPriceProvider = FutureProvider<FuelPriceModel>((ref) async {
-  final city = ref.watch(userCityProvider);
-  final repository = ref.read(fuelPriceRepositoryProvider);
-  return repository.getFuelPrice(city);
-});
-
-/// The effective fuel price to use in calculations.
-/// Uses override if set, otherwise API price based on fuel type.
+/// The effective fuel price — always uses the manual override set by the user.
+/// Fuel prices vary by region, so manual entry is required.
 final effectiveFuelPriceProvider = Provider<double>((ref) {
-  final isAuto = ref.watch(isAutoFuelPriceProvider);
   final override = ref.watch(fuelPriceOverrideProvider);
-
-  if (!isAuto && override != null && override > 0) return override;
-
-  final fuelType = ref.watch(fuelTypeProvider);
-  final priceAsync = ref.watch(fuelPriceProvider);
-
-  return priceAsync.when(
-    data: (model) {
-      return fuelType == FuelType.petrol
-          ? model.petrolPrice
-          : model.dieselPrice;
-    },
-    loading: () {
-      return fuelType == FuelType.petrol ? 103.44 : 90.56; // defaults
-    },
-    error: (_, __) {
-      return fuelType == FuelType.petrol ? 103.44 : 90.56;
-    },
-  );
+  if (override != null && override > 0) return override;
+  return 0; // Returns 0 if no price entered yet (calculation won't run)
 });
 
 // ─── Calculation Result ─────────────────────────────────────────
