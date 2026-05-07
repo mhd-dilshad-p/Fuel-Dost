@@ -31,9 +31,11 @@ final originAddressProvider = StateProvider<String>((ref) => 'Current Location')
 final destinationAddressProvider = StateProvider<String>((ref) => '');
 
 // ─── Route Provider (Debounced) ─────────────────────────────────
-// To prevent excessive API calls, we'll wrap the destination in an 800ms debounce
+// To prevent excessive API calls, we'll debounce both origin & destination
 final _debouncedDestinationProvider = StateProvider<LatLng?>((ref) => null);
+final _debouncedOriginProvider = StateProvider<LatLng?>((ref) => null);
 Timer? _debounceTimer;
+Timer? _originDebounceTimer;
 
 void setDebouncedDestination(WidgetRef ref, LatLng dest) {
   ref.read(destinationProvider.notifier).state = dest;
@@ -43,8 +45,16 @@ void setDebouncedDestination(WidgetRef ref, LatLng dest) {
   });
 }
 
+void setDebouncedOrigin(WidgetRef ref, LatLng origin) {
+  ref.read(originProvider.notifier).state = origin;
+  _originDebounceTimer?.cancel();
+  _originDebounceTimer = Timer(const Duration(milliseconds: 800), () {
+    ref.read(_debouncedOriginProvider.notifier).state = origin;
+  });
+}
+
 final routeProvider = FutureProvider<RouteModel?>((ref) async {
-  final origin = ref.watch(originProvider);
+  final origin = ref.watch(_debouncedOriginProvider);
   final destination = ref.watch(_debouncedDestinationProvider);
 
   if (origin == null || destination == null) return null;
@@ -85,9 +95,12 @@ final initLocationProvider = FutureProvider<void>((ref) async {
   try {
     final position = await locationService.getCurrentPosition();
     final latLng = LatLng(position.latitude, position.longitude);
+    // Populate both visual and debounced providers so route triggers immediately
     ref.read(originProvider.notifier).state = latLng;
+    ref.read(_debouncedOriginProvider.notifier).state = latLng;
+    ref.read(originAddressProvider.notifier).state = 'My Location';
 
-    // Center map on curr location
+    // Center map on current location
     ref.read(mapControllerProvider).move(latLng, 15.0);
 
     final city = await locationService.getCityFromCoordinates(
@@ -97,8 +110,10 @@ final initLocationProvider = FutureProvider<void>((ref) async {
     debugPrint('Detected city: $city');
   } catch (e) {
     debugPrint('Location init error: $e');
-    final defaultLoc = const LatLng(28.6139, 77.2090);
+    const defaultLoc = LatLng(28.6139, 77.2090);
     ref.read(originProvider.notifier).state = defaultLoc;
+    ref.read(_debouncedOriginProvider.notifier).state = defaultLoc;
+    ref.read(originAddressProvider.notifier).state = 'My Location';
     ref.read(mapControllerProvider).move(defaultLoc, 15.0);
   }
 });

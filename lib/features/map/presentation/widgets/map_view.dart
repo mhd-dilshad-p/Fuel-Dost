@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,6 +12,9 @@ import '../../domain/providers/map_provider.dart';
 import '../../domain/providers/search_provider.dart';
 import '../../../fuel_calculator/domain/providers/fuel_calculator_provider.dart';
 
+// ─── Which field is actively searching ──────────────────────────
+enum _ActiveSearch { none, origin, destination }
+
 class MapViewWidget extends ConsumerStatefulWidget {
   const MapViewWidget({super.key});
 
@@ -17,17 +22,57 @@ class MapViewWidget extends ConsumerStatefulWidget {
   ConsumerState<MapViewWidget> createState() => _MapViewWidgetState();
 }
 
-class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
-  static const _defaultPosition = LatLng(20.5937, 78.9629); // India center
-  final _searchController = TextEditingController();
-  final _searchFocusNode = FocusNode();
-  bool _isSearching = false;
+class _MapViewWidgetState extends ConsumerState<MapViewWidget>
+    with SingleTickerProviderStateMixin {
+  static const _defaultPosition = LatLng(20.5937, 78.9629);
+
+  final _originController = TextEditingController();
+  final _destController = TextEditingController();
+  final _originFocus = FocusNode();
+  final _destFocus = FocusNode();
+
+  _ActiveSearch _activeSearch = _ActiveSearch.none;
+  late AnimationController _cardAnim;
+  late Animation<double> _cardFade;
+
+  @override
+  void initState() {
+    super.initState();
+    _cardAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _cardFade = CurvedAnimation(parent: _cardAnim, curve: Curves.easeOut);
+
+    _originFocus.addListener(() {
+      if (_originFocus.hasFocus) {
+        setState(() => _activeSearch = _ActiveSearch.origin);
+        _cardAnim.forward();
+      }
+    });
+    _destFocus.addListener(() {
+      if (_destFocus.hasFocus) {
+        setState(() => _activeSearch = _ActiveSearch.destination);
+        _cardAnim.forward();
+      }
+    });
+  }
 
   @override
   void dispose() {
-    _searchController.dispose();
-    _searchFocusNode.dispose();
+    _originController.dispose();
+    _destController.dispose();
+    _originFocus.dispose();
+    _destFocus.dispose();
+    _cardAnim.dispose();
     super.dispose();
+  }
+
+  void _dismissSearch() {
+    _originFocus.unfocus();
+    _destFocus.unfocus();
+    _cardAnim.reverse();
+    setState(() => _activeSearch = _ActiveSearch.none);
   }
 
   @override
@@ -38,29 +83,36 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
     final routeAsync = ref.watch(routeProvider);
     final isLoading = ref.watch(isLoadingRouteProvider);
     final nearbyPumpsAsync = ref.watch(nearbyFuelPumpsProvider);
-    final searchResultsAsync = ref.watch(searchResultsProvider);
 
-    // Build Markers
+    // ── Sync text controllers with address providers ──────────────
+    final originAddr = ref.watch(originAddressProvider);
+    final destAddr = ref.watch(destinationAddressProvider);
+    if (!_originFocus.hasFocus && _originController.text != originAddr) {
+      _originController.text = originAddr;
+    }
+    if (!_destFocus.hasFocus && _destController.text != destAddr) {
+      _destController.text = destAddr;
+    }
+
+    // ── Build Markers ─────────────────────────────────────────────
     final markers = <Marker>[];
     if (origin != null) {
-      markers.add(
-        Marker(
-          point: origin,
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.location_on, color: AppColors.success, size: 40),
-        ),
-      );
+      markers.add(Marker(
+        point: origin,
+        width: 40,
+        height: 40,
+        child: const Icon(Icons.trip_origin_rounded,
+            color: AppColors.success, size: 36),
+      ));
     }
     if (destination != null) {
-      markers.add(
-        Marker(
-          point: destination,
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.location_on, color: AppColors.error, size: 40),
-        ),
-      );
+      markers.add(Marker(
+        point: destination,
+        width: 40,
+        height: 40,
+        child: const Icon(Icons.location_on_rounded,
+            color: AppColors.error, size: 40),
+      ));
     }
 
     // Add nearby pump markers
@@ -68,42 +120,40 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
       for (int i = 0; i < pumps.length; i++) {
         final pump = pumps[i];
         final isClosest = i == 0;
-        markers.add(
-          Marker(
-            point: pump.location,
-            width: isClosest ? 44 : 36,
-            height: isClosest ? 44 : 36,
-            child: GestureDetector(
-              onTap: () => _showPumpDetails(pump),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isClosest ? AppColors.primary : Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isClosest ? Colors.white : AppColors.primary, 
-                    width: isClosest ? 3 : 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: isClosest ? 8 : 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  Icons.local_gas_station_rounded,
+        markers.add(Marker(
+          point: pump.location,
+          width: isClosest ? 44 : 36,
+          height: isClosest ? 44 : 36,
+          child: GestureDetector(
+            onTap: () => _showPumpDetails(pump),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isClosest ? AppColors.primary : Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(
                   color: isClosest ? Colors.white : AppColors.primary,
-                  size: isClosest ? 24 : 20,
+                  width: isClosest ? 3 : 2,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: isClosest ? 8 : 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.local_gas_station_rounded,
+                color: isClosest ? Colors.white : AppColors.primary,
+                size: isClosest ? 24 : 20,
               ),
             ),
           ),
-        );
+        ));
       }
     });
 
-    // Build Polylines
+    // ── Build Polylines ───────────────────────────────────────────
     final polylines = <Polyline>[];
     routeAsync.whenData((route) {
       if (route != null && route.polylinePoints.isNotEmpty) {
@@ -112,8 +162,6 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
           color: AppColors.primary,
           strokeWidth: 5.0,
         ));
-
-        // Wait to draw and then try updating distance
         WidgetsBinding.instance.addPostFrameCallback((_) {
           ref.read(distanceProvider.notifier).state = route.distanceKm;
         });
@@ -122,14 +170,18 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
 
     return Stack(
       children: [
+        // ── Map ──────────────────────────────────────────────────
         FlutterMap(
           mapController: mapController,
           options: MapOptions(
             initialCenter: origin ?? _defaultPosition,
             initialZoom: origin != null ? 14.0 : 5.0,
             onTap: (_, latLng) {
-               _onMapTap(latLng);
-               if (_searchFocusNode.hasFocus) _searchFocusNode.unfocus();
+              if (_activeSearch != _ActiveSearch.none) {
+                _dismissSearch();
+              } else {
+                _onMapTap(latLng);
+              }
             },
           ),
           children: [
@@ -142,122 +194,103 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
           ],
         ),
 
-        // SEARCH BAR
+        // ── Route Planner Card ───────────────────────────────────
         Positioned(
           top: MediaQuery.of(context).padding.top + 10,
           left: 16,
           right: 16,
           child: Column(
             children: [
+              // Card with From / To fields
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
+                      color: Colors.black.withOpacity(0.13),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
                     ),
                   ],
                 ),
-                child: TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  onChanged: (val) {
-                    ref.read(searchQueryProvider.notifier).state = val;
-                    setState(() => _isSearching = val.isNotEmpty);
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Search destination...',
-                    prefixIcon: const Icon(Icons.search, color: AppColors.primary),
-                    suffixIcon: _searchController.text.isNotEmpty 
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            ref.read(searchQueryProvider.notifier).state = '';
-                            setState(() => _isSearching = false);
-                            _searchFocusNode.unfocus();
-                          },
-                        )
-                      : null,
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                child: Column(
+                  children: [
+                    // ── FROM field ───────────────────────────────
+                    _LocationField(
+                      controller: _originController,
+                      focusNode: _originFocus,
+                      hintText: 'From — search or use GPS',
+                      icon: Icons.trip_origin_rounded,
+                      iconColor: AppColors.success,
+                      isFirst: true,
+                      onChanged: (val) {
+                        ref.read(originSearchQueryProvider.notifier).state =
+                            val;
+                      },
+                      onClear: () {
+                        _originController.clear();
+                        ref.read(originSearchQueryProvider.notifier).state = '';
+                      },
+                      trailingWidget: _GpsButton(onTap: _goToCurrentLocation),
+                    ),
+
+                    // Divider with swap button
+                    _SwapDivider(onSwap: _swapLocations),
+
+                    // ── TO field ────────────────────────────────
+                    _LocationField(
+                      controller: _destController,
+                      focusNode: _destFocus,
+                      hintText: 'To — search destination',
+                      icon: Icons.location_on_rounded,
+                      iconColor: AppColors.error,
+                      isFirst: false,
+                      onChanged: (val) {
+                        ref.read(searchQueryProvider.notifier).state = val;
+                      },
+                      onClear: () {
+                        _destController.clear();
+                        ref.read(searchQueryProvider.notifier).state = '';
+                        ref.read(destinationProvider.notifier).state = null;
+                        ref.read(destinationAddressProvider.notifier).state =
+                            '';
+                        ref.read(distanceProvider.notifier).state = 0;
+                      },
+                    ),
+                  ],
                 ),
               ),
 
-              // Search Results List
-              if (_isSearching)
-                Container(
-                  margin: const EdgeInsets.only(top: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                      ),
-                    ],
-                  ),
-                  constraints: const BoxConstraints(maxHeight: 250),
-                  child: searchResultsAsync.when(
-                    data: (results) {
-                      if (results.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Text('No results found'),
-                        );
-                      }
-                      return ListView.separated(
-                        shrinkWrap: true,
-                        padding: EdgeInsets.zero,
-                        itemCount: results.length,
-                        separatorBuilder: (context, index) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final res = results[index];
-                          return ListTile(
-                            leading: const Icon(Icons.location_on_outlined),
-                            title: Text(
-                              res.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            onTap: () {
-                              _onSearchResultTap(res);
-                            },
-                          );
-                        },
-                      );
-                    },
-                    loading: () => const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                    error: (e, _) => Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text('Error: $e'),
-                    ),
-                  ),
+              const SizedBox(height: 6),
+
+              // ── Search Results Dropdown ──────────────────────
+              if (_activeSearch == _ActiveSearch.origin)
+                _SearchDropdown(
+                  resultsAsync: ref.watch(originSearchResultsProvider),
+                  onSelect: (res) => _onOriginSelected(res),
+                  fade: _cardFade,
+                ),
+              if (_activeSearch == _ActiveSearch.destination)
+                _SearchDropdown(
+                  resultsAsync: ref.watch(searchResultsProvider),
+                  onSelect: (res) => _onDestinationSelected(res),
+                  fade: _cardFade,
                 ),
             ],
           ),
         ),
 
-        // Loading indicator
+        // ── Route calculating indicator ──────────────────────────
         if (isLoading)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 75,
+            top: MediaQuery.of(context).padding.top + 130,
             left: 0,
             right: 0,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: AppColors.surface,
                   borderRadius: BorderRadius.circular(20),
@@ -268,10 +301,10 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                     ),
                   ],
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(
+                    const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
@@ -279,15 +312,19 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                         color: AppColors.primary,
                       ),
                     ),
-                    SizedBox(width: 8),
-                    Text('Calculating route...'),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Calculating route...',
+                      style: GoogleFonts.inter(
+                          fontSize: 13, color: AppColors.textSecondary),
+                    ),
                   ],
                 ),
               ),
             ),
           ),
 
-        // My Location Button
+        // ── FAB buttons (right side) ─────────────────────────────
         Positioned(
           bottom: MediaQuery.of(context).size.height * 0.45 + 16,
           right: 16,
@@ -295,13 +332,13 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
             children: [
               _MapButton(
                 icon: Icons.my_location_rounded,
-                onTap: () => _goToCurrentLocation(),
+                onTap: _goToCurrentLocation,
               ),
               const SizedBox(height: 8),
               if (origin != null && destination != null)
                 _MapButton(
                   icon: Icons.clear_rounded,
-                  onTap: () => _clearRoute(),
+                  onTap: _clearRoute,
                   color: AppColors.error,
                 ),
             ],
@@ -311,11 +348,24 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
     );
   }
 
-  void _onSearchResultTap(SearchResult res) {
-    _searchController.text = res.name;
+  // ─── Handlers ──────────────────────────────────────────────────
+
+  void _onOriginSelected(SearchResult res) {
+    HapticFeedback.selectionClick();
+    _originController.text = res.name;
+    ref.read(originSearchQueryProvider.notifier).state = '';
+    _dismissSearch();
+
+    setDebouncedOrigin(ref, res.location);
+    ref.read(originAddressProvider.notifier).state = res.name;
+    ref.read(mapControllerProvider).move(res.location, 14);
+  }
+
+  void _onDestinationSelected(SearchResult res) {
+    HapticFeedback.selectionClick();
+    _destController.text = res.name;
     ref.read(searchQueryProvider.notifier).state = '';
-    setState(() => _isSearching = false);
-    _searchFocusNode.unfocus();
+    _dismissSearch();
 
     setDebouncedDestination(ref, res.location);
     ref.read(destinationAddressProvider.notifier).state = res.name;
@@ -324,21 +374,23 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
 
   void _onMapTap(LatLng latLng) {
     setDebouncedDestination(ref, latLng);
-
-    // Update destination address optionally if needed
     final locationService = ref.read(locationServiceProvider);
-    locationService.getAddressFromCoordinates(latLng.latitude, latLng.longitude)
-      .then((addr) {
-        ref.read(destinationAddressProvider.notifier).state = addr;
-      }).catchError((_) {});
+    locationService
+        .getAddressFromCoordinates(latLng.latitude, latLng.longitude)
+        .then((addr) {
+      ref.read(destinationAddressProvider.notifier).state = addr;
+    }).catchError((_) {});
   }
 
   void _goToCurrentLocation() async {
+    HapticFeedback.lightImpact();
     final locationService = ref.read(locationServiceProvider);
     try {
       final position = await locationService.getCurrentPosition();
       final latLng = LatLng(position.latitude, position.longitude);
-      ref.read(originProvider.notifier).state = latLng;
+      setDebouncedOrigin(ref, latLng);
+      ref.read(originAddressProvider.notifier).state = 'My Location';
+      _originController.text = 'My Location';
       ref.read(mapControllerProvider).move(latLng, 15);
     } catch (e) {
       if (mounted) {
@@ -349,10 +401,32 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
     }
   }
 
+  void _swapLocations() {
+    HapticFeedback.mediumImpact();
+    final curOrigin = ref.read(originProvider);
+    final curDest = ref.read(destinationProvider);
+    final curOriginAddr = ref.read(originAddressProvider);
+    final curDestAddr = ref.read(destinationAddressProvider);
+
+    if (curOrigin == null && curDest == null) return;
+
+    // Swap providers
+    if (curDest != null) {
+      setDebouncedOrigin(ref, curDest);
+      ref.read(originAddressProvider.notifier).state = curDestAddr;
+    }
+    if (curOrigin != null) {
+      setDebouncedDestination(ref, curOrigin);
+      ref.read(destinationAddressProvider.notifier).state = curOriginAddr;
+    }
+  }
+
   void _clearRoute() {
+    HapticFeedback.lightImpact();
     ref.read(destinationProvider.notifier).state = null;
     ref.read(destinationAddressProvider.notifier).state = '';
     ref.read(distanceProvider.notifier).state = 0;
+    _destController.clear();
   }
 
   void _showPumpDetails(dynamic pump) {
@@ -377,7 +451,8 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                     color: AppColors.primary.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.local_gas_station_rounded, color: AppColors.primary),
+                  child: const Icon(Icons.local_gas_station_rounded,
+                      color: AppColors.primary),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -394,10 +469,8 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                       ),
                       Text(
                         'Nearby Station',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.textTertiary,
-                        ),
+                        style:
+                            TextStyle(fontSize: 14, color: AppColors.textTertiary),
                       ),
                     ],
                   ),
@@ -411,10 +484,9 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Distance',
-                      style: TextStyle(fontSize: 12, color: AppColors.textTertiary),
-                    ),
+                    const Text('Distance',
+                        style: TextStyle(
+                            fontSize: 12, color: AppColors.textTertiary)),
                     Text(
                       '${(pump.distanceFromUser / 1000).toStringAsFixed(1)} KM',
                       style: const TextStyle(
@@ -443,8 +515,10 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
                       ),
                     ),
                   ],
@@ -459,19 +533,265 @@ class _MapViewWidgetState extends ConsumerState<MapViewWidget> {
   }
 
   void _launchNavigationTo(LatLng destination) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+    final url =
+        'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
     if (await canLaunchUrl(Uri.parse(url))) {
       await launchUrl(Uri.parse(url));
     }
   }
 }
 
+// ─── Location Field ──────────────────────────────────────────────
+
+class _LocationField extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hintText;
+  final IconData icon;
+  final Color iconColor;
+  final bool isFirst;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+  final Widget? trailingWidget;
+
+  const _LocationField({
+    required this.controller,
+    required this.focusNode,
+    required this.hintText,
+    required this.icon,
+    required this.iconColor,
+    required this.isFirst,
+    required this.onChanged,
+    required this.onClear,
+    this.trailingWidget,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: isFirst
+          ? const BorderRadius.vertical(top: Radius.circular(20))
+          : BorderRadius.zero,
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        onChanged: onChanged,
+        style: GoogleFonts.inter(fontSize: 14, color: Colors.black87),
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: GoogleFonts.inter(
+            fontSize: 13,
+            color: Colors.grey.shade400,
+          ),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          suffixIcon: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (controller.text.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.clear_rounded,
+                      size: 18, color: Colors.grey),
+                  onPressed: onClear,
+                  splashRadius: 18,
+                ),
+              if (trailingWidget != null) trailingWidget!,
+            ],
+          ),
+          border: InputBorder.none,
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── GPS Button ──────────────────────────────────────────────────
+
+class _GpsButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _GpsButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child:
+            const Icon(Icons.my_location_rounded, color: AppColors.primary, size: 18),
+      ),
+    );
+  }
+}
+
+// ─── Swap Divider ────────────────────────────────────────────────
+
+class _SwapDivider extends StatelessWidget {
+  final VoidCallback onSwap;
+  const _SwapDivider({required this.onSwap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(width: 16),
+        Expanded(
+          child: Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+        ),
+        GestureDetector(
+          onTap: onSwap,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade200),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+            child: const Icon(Icons.swap_vert_rounded,
+                size: 18, color: AppColors.primary),
+          ),
+        ),
+        Expanded(
+          child: Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+        ),
+        const SizedBox(width: 16),
+      ],
+    );
+  }
+}
+
+// ─── Search Results Dropdown ─────────────────────────────────────
+
+class _SearchDropdown extends StatelessWidget {
+  final AsyncValue<List<SearchResult>> resultsAsync;
+  final ValueChanged<SearchResult> onSelect;
+  final Animation<double> fade;
+
+  const _SearchDropdown({
+    required this.resultsAsync,
+    required this.onSelect,
+    required this.fade,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: fade,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        constraints: const BoxConstraints(maxHeight: 240),
+        child: resultsAsync.when(
+          data: (results) {
+            if (results.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.search_off_rounded,
+                        color: Colors.grey.shade400, size: 18),
+                    const SizedBox(width: 10),
+                    Text(
+                      'No results found',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return ListView.separated(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              itemCount: results.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey.shade100),
+              itemBuilder: (context, index) {
+                final res = results[index];
+                return ListTile(
+                  dense: true,
+                  leading: Icon(Icons.location_on_outlined,
+                      color: AppColors.primary, size: 20),
+                  title: Text(
+                    res.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                        fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () => onSelect(res),
+                );
+              },
+            );
+          },
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ),
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('Error: $e',
+                style: GoogleFonts.inter(fontSize: 12, color: Colors.red)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Small Action Button ─────────────────────────────────────────
+
 class _SmallActionButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final Color color;
 
-  const _SmallActionButton({required this.icon, required this.onTap, required this.color});
+  const _SmallActionButton(
+      {required this.icon, required this.onTap, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -491,6 +811,8 @@ class _SmallActionButton extends StatelessWidget {
     );
   }
 }
+
+// ─── Map FAB Button ───────────────────────────────────────────────
 
 class _MapButton extends StatelessWidget {
   final IconData icon;

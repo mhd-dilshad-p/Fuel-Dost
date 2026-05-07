@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -15,39 +16,73 @@ class InsightsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final trips = ref.watch(tripsProvider);
     final suggestions = ref.watch(suggestionsProvider);
+    final topPadding = MediaQuery.of(context).padding.top;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Insights'),
-      ),
+      backgroundColor: AppColors.background,
       body: trips.isEmpty
-          ? _EmptyInsights()
+          ? _EmptyInsights(topPadding: topPadding)
           : CustomScrollView(
+              physics: const BouncingScrollPhysics(),
               slivers: [
-                // Spending Chart
+                // 1. PREMIUM DYNAMIC APP BAR
+                SliverAppBar(
+                  expandedHeight: 80,
+                  pinned: true,
+                  stretch: true,
+                  backgroundColor: AppColors.background,
+                  elevation: 0,
+                  // Adds professional status bar styling
+                  systemOverlayStyle: SystemUiOverlayStyle.dark,
+                  flexibleSpace: FlexibleSpaceBar(
+                    stretchModes: const [StretchMode.zoomBackground, StretchMode.blurBackground],
+                    titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+                    title: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Insights',
+                          style: GoogleFonts.inter(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 24,
+                            letterSpacing: -1.0,
+                          ),
+                        ),
+                        // Collapses when scrolled
+                        const SizedBox(height: 2),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 2. PRIMARY CHART: MONTHLY SPENDING
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: _SectionCard(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    child: _PremiumSectionCard(
                       title: 'Monthly Spending',
-                      subtitle: 'Last 6 months',
-                      icon: Icons.bar_chart_rounded,
+                      subtitle: 'Historical patterns',
+                      icon: Icons.bubble_chart_rounded,
+                      accentColor: AppColors.primary,
                       child: const SizedBox(
-                        height: 220,
+                        height: 240,
                         child: SpendingChart(),
                       ),
                     ),
                   ),
                 ),
 
-                // Cost Per Km Trend
+                // 3. SECONDARY CHART: TREND
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: _SectionCard(
-                      title: 'Cost per km Trend',
-                      subtitle: 'Recent trips',
-                      icon: Icons.trending_up_rounded,
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    child: _PremiumSectionCard(
+                      title: 'Efficiency Trend',
+                      subtitle: 'Cost per kilometer',
+                      icon: Icons.analytics_outlined,
+                      accentColor: AppColors.accent,
                       child: const SizedBox(
                         height: 200,
                         child: TrendCard(),
@@ -56,93 +91,153 @@ class InsightsScreen extends ConsumerWidget {
                   ),
                 ),
 
-                // Smart Tips Section
+                // 4. SMART TIPS SECTION HEADER
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Icon(
-                          Icons.lightbulb_rounded,
-                          color: AppColors.accent,
-                          size: 20,
+                        Row(
+                          children: [
+                            Container(
+                              width: 3,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Smart Recommendations',
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textPrimary,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Smart Tips',
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
+                        Icon(Icons.auto_awesome_rounded, size: 16, color: AppColors.accent.withOpacity(0.5)),
                       ],
                     ),
                   ),
                 ),
 
-                // Suggestion Cards
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        child: SuggestionCard(
-                            suggestion: suggestions[index]),
-                      );
-                    },
-                    childCount: suggestions.length,
+                // 5. SUGGESTION LIST
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: SuggestionCard(suggestion: suggestions[index]),
+                        );
+                      },
+                      childCount: suggestions.length,
+                    ),
                   ),
                 ),
 
-                const SliverToBoxAdapter(
-                  child: SizedBox(height: 80),
-                ),
+                // Bottom Spacing for Navigation Bar
+                const SliverToBoxAdapter(child: SizedBox(height: 100)),
               ],
             ),
     );
   }
 }
 
-class _EmptyInsights extends StatelessWidget {
+class _PremiumSectionCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final Widget child;
+
+  const _PremiumSectionCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accentColor,
+    required this.child,
+  });
+
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.textTertiary.withOpacity(0.08), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                // Decorative Icon Container
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [accentColor.withOpacity(0.2), accentColor.withOpacity(0.05)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, size: 20, color: accentColor),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Premium Detail Indicator
+                Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppColors.textTertiary.withOpacity(0.3)),
+              ],
+            ),
+          ),
+          // Chart Container with subtle background padding
           Container(
-            width: 100,
-            height: 100,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.1),
-              shape: BoxShape.circle,
+              color: AppColors.background.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(20),
             ),
-            child: const Icon(
-              Icons.insights_rounded,
-              size: 48,
-              color: AppColors.accent,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'No insights yet',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Save a few trips to unlock\npersonalized fuel insights',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: AppColors.textTertiary,
-              height: 1.5,
-            ),
+            child: child,
           ),
         ],
       ),
@@ -150,63 +245,76 @@ class _EmptyInsights extends StatelessWidget {
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Widget child;
-
-  const _SectionCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.child,
-  });
+class _EmptyInsights extends StatelessWidget {
+  final double topPadding;
+  const _EmptyInsights({required this.topPadding});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    return Column(
+      children: [
+        SizedBox(height: topPadding + 24),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            'Insights',
+            style: GoogleFonts.inter(
+              fontSize: 34,
+              fontWeight: FontWeight.w900,
+              color: AppColors.textPrimary,
+              letterSpacing: -1.5,
+            ),
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        ),
+        const Spacer(),
+        Center(
+          child: Column(
             children: [
-              Icon(icon, size: 20, color: AppColors.primary),
-              const SizedBox(width: 8),
+              // Premium Animated-style illustration placeholder
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 160,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        colors: [AppColors.accent.withOpacity(0.1), Colors.transparent],
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.auto_graph_rounded, size: 64, color: AppColors.accent.withOpacity(0.8)),
+                ],
+              ),
+              const SizedBox(height: 32),
               Text(
-                title,
+                'Analyzing Trends...',
                 style: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
                 ),
               ),
-              const Spacer(),
-              Text(
-                subtitle,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.textTertiary,
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 48),
+                child: Text(
+                  'Record more trips to allow our smart engine to calculate your fuel efficiency and saving patterns.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    color: AppColors.textTertiary,
+                    height: 1.6,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          child,
-        ],
-      ),
+        ),
+        const Spacer(flex: 2),
+      ],
     );
   }
 }

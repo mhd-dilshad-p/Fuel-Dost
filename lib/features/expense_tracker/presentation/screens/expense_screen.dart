@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -13,76 +14,100 @@ class ExpenseScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final trips = ref.watch(tripsProvider);
+    // Get device padding for safe area logic
+    final topPadding = MediaQuery.of(context).padding.top;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Expenses'),
-        actions: [
-          if (trips.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Chip(
-                label: Text(
-                  '${trips.length} trips',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-                backgroundColor: AppColors.primary.withOpacity(0.1),
-                side: BorderSide.none,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-            ),
-        ],
-      ),
-      body: trips.isEmpty ? _EmptyState() : _TripsList(trips: trips),
+      backgroundColor: AppColors.background,
+      body: trips.isEmpty 
+          ? _EmptyState(topPadding: topPadding) 
+          : _TripsList(trips: trips, topPadding: topPadding),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
+  final double topPadding;
+  const _EmptyState({required this.topPadding});
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
+      children: [
+        SizedBox(height: topPadding + 20),
+        _HeaderSection(count: 0),
+        Expanded(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Opacity(
+                  opacity: 0.5,
+                  child: Icon(Icons.receipt_long_rounded, size: 80, color: AppColors.textTertiary),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'No Records Found',
+                  style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderSection extends StatelessWidget {
+  final int count;
+  const _HeaderSection({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.receipt_long_rounded,
-              size: 48,
-              color: AppColors.primary,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Expenses',
+                style: GoogleFonts.inter(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                  letterSpacing: -1,
+                ),
+              ),
+              Text(
+                'History & Insights',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          Text(
-            'No trips recorded yet',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
+          if (count > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '$count trips',
+                style: GoogleFonts.inter(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Calculate your fuel cost and save trips\nto track your expenses',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: AppColors.textTertiary,
-              height: 1.5,
-            ),
-          ),
         ],
       ),
     );
@@ -91,99 +116,113 @@ class _EmptyState extends StatelessWidget {
 
 class _TripsList extends ConsumerWidget {
   final List trips;
+  final double topPadding;
 
-  const _TripsList({required this.trips});
+  const _TripsList({required this.trips, required this.topPadding});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
       slivers: [
-        // Monthly Summary
+        SliverToBoxAdapter(child: SizedBox(height: topPadding + 20)),
+        
+        // 1. Title Header
+        SliverToBoxAdapter(child: _HeaderSection(count: trips.length)),
+        
+        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+
+        // 2. Summary Card
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: MonthlySummaryCard(),
           ),
         ),
 
-        // Section Header
+        // 3. Section Divider
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
             child: Text(
-              'Recent Trips',
+              'RECENT ACTIVITY',
               style: GoogleFonts.inter(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
+                color: AppColors.textTertiary,
               ),
             ),
           ),
         ),
 
-        // Trip List
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              final trip = trips[index];
-              return Dismissible(
-                key: Key(trip.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  margin: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.error,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 20),
-                  child: const Icon(
-                    Icons.delete_rounded,
-                    color: Colors.white,
-                  ),
-                ),
-                confirmDismiss: (direction) async {
-                  return await showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      title: const Text('Delete Trip'),
-                      content: Text(
-                        'Delete this trip of ${Formatters.currency(trip.cost)}?',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppColors.error,
-                          ),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                onDismissed: (_) {
-                  ref.read(tripsProvider.notifier).deleteTrip(trip.id);
-                },
-                child: TripListItem(trip: trip),
-              );
-            },
-            childCount: trips.length,
+        // 4. List Items
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final trip = trips[index];
+                return Dismissible(
+                  key: Key(trip.id),
+                  direction: DismissDirection.endToStart,
+                  onUpdate: (details) {
+                    if (details.reached && !details.previousReached) {
+                      HapticFeedback.lightImpact();
+                    }
+                  },
+                  background: _buildDeleteBackground(),
+                  confirmDismiss: (dir) => _showDeleteConfirm(context, trip),
+                  onDismissed: (_) => ref.read(tripsProvider.notifier).deleteTrip(trip.id),
+                  child: TripListItem(trip: trip),
+                );
+              },
+              childCount: trips.length,
+            ),
           ),
         ),
-
-        const SliverToBoxAdapter(
-          child: SizedBox(height: 80),
-        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
+    );
+  }
+
+  Widget _buildDeleteBackground() {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.error,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 25),
+      child: const Icon(Icons.delete_forever_rounded, color: Colors.white, size: 28),
+    );
+  }
+
+ Future<bool?> _showDeleteConfirm(BuildContext context, dynamic trip) {
+    // FIX: Changed warningImpact to heavyImpact
+    HapticFeedback.heavyImpact(); 
+    
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Delete Trip?', style: GoogleFonts.inter(fontWeight: FontWeight.w800)),
+        content: Text('Remove this entry of ${Formatters.currency(trip.cost)}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error, 
+              foregroundColor: Colors.white,
+              elevation: 0,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,7 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../expense_tracker/domain/providers/expense_provider.dart';
+import '../../../../core/utils/formatters.dart'; // Assuming Formatters exists here
 
-// ─── Insights Data ──────────────────────────────────────────────
+// ─── Insights Data Provider ─────────────────────────────────────
 
 /// Smart suggestions based on trip data.
 final suggestionsProvider = Provider<List<InsightSuggestion>>((ref) {
@@ -9,6 +10,7 @@ final suggestionsProvider = Provider<List<InsightSuggestion>>((ref) {
   final repository = ref.read(tripRepositoryProvider);
   final suggestions = <InsightSuggestion>[];
 
+  // 1. Initial State Check
   if (trips.isEmpty) {
     suggestions.add(InsightSuggestion(
       icon: '🚗',
@@ -19,40 +21,42 @@ final suggestionsProvider = Provider<List<InsightSuggestion>>((ref) {
     return suggestions;
   }
 
+  // 2. Time-based Calculations
   final now = DateTime.now();
   final currentMonth = repository.getMonthlyTotal(now.year, now.month);
-  final prevMonth = repository.getMonthlyTotal(
-    now.month == 1 ? now.year - 1 : now.year,
-    now.month == 1 ? 12 : now.month - 1,
-  );
+  
+  // Clean calculation for previous month
+  final prevMonthDate = DateTime(now.year, now.month - 1);
+  final prevMonth = repository.getMonthlyTotal(prevMonthDate.year, prevMonthDate.month);
 
-  // Spending comparison
-  if (prevMonth > 0 && currentMonth > prevMonth) {
-    final increase = currentMonth - prevMonth;
-    final pct = ((increase / prevMonth) * 100).toStringAsFixed(0);
-    suggestions.add(InsightSuggestion(
-      icon: '📈',
-      title: 'Spending Increased',
-      message:
-          'Fuel spending increased $pct% compared to last month (+₹${increase.toStringAsFixed(0)})',
-      type: SuggestionType.warning,
-    ));
-  } else if (prevMonth > 0 && currentMonth < prevMonth) {
-    final savings = prevMonth - currentMonth;
-    suggestions.add(InsightSuggestion(
-      icon: '🎉',
-      title: 'Great Savings!',
-      message:
-          'You saved ₹${savings.toStringAsFixed(0)} this month compared to last month!',
-      type: SuggestionType.success,
-    ));
+  // 3. Spending Comparison Logic
+  if (prevMonth > 0) {
+    if (currentMonth > prevMonth) {
+      final increase = currentMonth - prevMonth;
+      final pct = ((increase / prevMonth) * 100).toStringAsFixed(0);
+      suggestions.add(InsightSuggestion(
+        icon: '📈',
+        title: 'Spending Increased',
+        message: 'Fuel spending increased $pct% compared to last month (+${Formatters.currency(increase)})',
+        type: SuggestionType.warning,
+      ));
+    } else if (currentMonth < prevMonth) {
+      final savings = prevMonth - currentMonth;
+      suggestions.add(InsightSuggestion(
+        icon: '🎉',
+        title: 'Great Savings!',
+        message: 'You saved ${Formatters.currency(savings)} this month compared to last month!',
+        type: SuggestionType.success,
+      ));
+    }
   }
 
-  // Mileage improvement suggestion
+  // 4. Mileage Improvement Logic
   if (trips.length >= 3) {
-    final avgMileage =
-        trips.take(10).fold(0.0, (sum, t) => sum + t.mileage) /
-            trips.take(10).length.clamp(1, 10);
+    // Average of up to last 10 trips
+    final recentTrips = trips.take(10).toList();
+    final avgMileage = recentTrips.fold(0.0, (sum, t) => sum + t.mileage) / recentTrips.length;
+    
     final potentialSavings = _calculateMileageSavings(
       avgMileage: avgMileage,
       monthlyDistance: repository.getMonthlyDistance(now.year, now.month),
@@ -63,37 +67,37 @@ final suggestionsProvider = Provider<List<InsightSuggestion>>((ref) {
       suggestions.add(InsightSuggestion(
         icon: '💡',
         title: 'Improve Mileage',
-        message:
-            'Improving mileage by 2 km/l could save you ₹${potentialSavings.toStringAsFixed(0)}/month',
+        message: 'Improving mileage by 2 km/l could save you ${Formatters.currency(potentialSavings)}/month',
         type: SuggestionType.tip,
       ));
     }
   }
 
-  // Fuel type comparison
-  final petrolTrips = trips.where((t) => t.fuelType == 'Petrol');
-  final dieselTrips = trips.where((t) => t.fuelType == 'Diesel');
-  if (petrolTrips.isNotEmpty && dieselTrips.isEmpty) {
+  // 5. Fuel Analysis Logic
+  final hasPetrol = trips.any((t) => t.fuelType == 'Petrol');
+  final hasDiesel = trips.any((t) => t.fuelType == 'Diesel');
+  
+  if (hasPetrol && !hasDiesel) {
     suggestions.add(InsightSuggestion(
       icon: '⛽',
       title: 'Consider Diesel',
-      message:
-          'Diesel vehicles often have better mileage and lower per-km costs',
+      message: 'Diesel vehicles often have better mileage and lower per-km costs for long distances.',
       type: SuggestionType.info,
     ));
   }
 
-  // Driving habit tip
+  // 6. Static Driving Tip
   suggestions.add(InsightSuggestion(
     icon: '🌿',
     title: 'Eco Driving Tip',
-    message:
-        'Maintaining steady speeds between 45-65 km/h can improve fuel efficiency by up to 15%',
+    message: 'Maintaining steady speeds between 45-65 km/h can improve fuel efficiency by up to 15%.',
     type: SuggestionType.tip,
   ));
 
   return suggestions;
 });
+
+// ─── Helper Logic ───────────────────────────────────────────────
 
 double _calculateMileageSavings({
   required double avgMileage,
@@ -102,39 +106,33 @@ double _calculateMileageSavings({
 }) {
   if (avgMileage <= 0 || monthlyDistance <= 0) return 0;
 
-  final currentFuel = monthlyDistance / avgMileage;
-  final improvedFuel = monthlyDistance / (avgMileage + 2);
-  final savings = (currentFuel - improvedFuel) * fuelPrice;
+  final currentFuelUsed = monthlyDistance / avgMileage;
+  final improvedFuelUsed = monthlyDistance / (avgMileage + 2);
+  final savings = (currentFuelUsed - improvedFuelUsed) * fuelPrice;
 
   return savings;
 }
 
-// ─── Cost Per Km Trend ──────────────────────────────────────────
+// ─── Cost Per Km Trend Provider ─────────────────────────────────
 
 final costPerKmTrendProvider = Provider<List<TrendPoint>>((ref) {
   final trips = ref.watch(tripsProvider);
   if (trips.isEmpty) return [];
 
-  // Group by week and calculate average cost/km
-  final points = <TrendPoint>[];
+  // Sort trips by date and take the 20 most recent
   final sortedTrips = List.of(trips)..sort((a, b) => a.date.compareTo(b.date));
+  final recentTrips = sortedTrips.length > 20 
+      ? sortedTrips.sublist(sortedTrips.length - 20) 
+      : sortedTrips;
 
-  for (int i = 0; i < sortedTrips.length && i < 20; i++) {
-    final trip = sortedTrips[sortedTrips.length - 1 - i];
-    points.insert(
-      0,
-      TrendPoint(
-        date: trip.date,
-        value: trip.costPerKm,
-        label: '₹${trip.costPerKm.toStringAsFixed(1)}/km',
-      ),
-    );
-  }
-
-  return points;
+  return recentTrips.map((trip) => TrendPoint(
+    date: trip.date,
+    value: trip.costPerKm,
+    label: '${Formatters.currency(trip.costPerKm)}/km',
+  )).toList();
 });
 
-// ─── Models ─────────────────────────────────────────────────────
+// ─── Data Models ────────────────────────────────────────────────
 
 class InsightSuggestion {
   final String icon;
@@ -142,7 +140,7 @@ class InsightSuggestion {
   final String message;
   final SuggestionType type;
 
-  InsightSuggestion({
+  const InsightSuggestion({
     required this.icon,
     required this.title,
     required this.message,

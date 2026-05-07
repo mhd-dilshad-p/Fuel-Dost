@@ -1,6 +1,6 @@
-# fuel_sathi
+# fuel_dost
 
-A new Flutter project.
+A modern fuel assistant app with map-based distance calculation, petrol/diesel pricing, vehicle insights, and a smooth, premium user experience.
 
 ## Getting Started
 
